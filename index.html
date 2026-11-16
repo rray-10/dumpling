@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI3 南港美食 3D 午餐選擇器</title>
+  <style>
+    /* 1. CSS Reset & Canvas 全螢幕佈局 */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%; overflow: hidden;
+      font-family: "Noto Sans TC", "Microsoft JhengHei", "PingFang TC", system-ui, sans-serif;
+      font-size: 16px;
+      background: #0b1020;
+      color: #ffffff;
+    }
+    .hidden { display: none !important; }
+    #canvas-container { position: absolute; inset: 0; }
+    #canvas-container canvas { display: block; }
+
+    /* 2. 控制面板 UI（深色實底，確保文字對比） */
+    #header {
+      position: absolute; top: 0; left: 0; right: 0; z-index: 2;
+      padding: 16px 24px; font-size: 22px; font-weight: 800; letter-spacing: .5px;
+      background: #0b1020; border-bottom: 2px solid #ffb347;
+    }
+    #header small { font-weight: 500; color: #d9e0f2; margin-left: 12px; font-size: 15px; }
+    #load-error {
+      position: absolute; top: 80px; left: 50%; transform: translateX(-50%); z-index: 3;
+      background: #b3261e; color: #fff; padding: 12px 18px; border-radius: 10px; font-size: 15px; font-weight: 600;
+    }
+    #ui-container {
+      position: absolute; top: 80px; left: 16px; bottom: 16px; width: 320px; z-index: 2;
+      overflow-y: auto; padding: 22px; border-radius: 16px;
+      background: #141b33; border: 1px solid #3a4670; box-shadow: 0 10px 30px rgba(0,0,0,.5);
+      display: flex; flex-direction: column; gap: 20px;
+    }
+    .section-title { font-size: 17px; color: #ffb347; margin-bottom: 8px; font-weight: 700; }
+    .opt {
+      display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+      border-radius: 10px; cursor: pointer; font-size: 16px; color: #ffffff; user-select: none;
+    }
+    .opt:hover { background: #222c4d; }
+    .opt input { accent-color: #ffb347; width: 18px; height: 18px; cursor: pointer; }
+    .opt input:disabled + span { color: #8a93b0; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
+    #count-box {
+      padding: 14px; border-radius: 12px; background: #0b1020; border: 1px solid #3a4670;
+      font-size: 16px; line-height: 1.6;
+    }
+    #count-num { font-size: 30px; font-weight: 800; color: #ffb347; }
+    #count-names { font-size: 14px; color: #d9e0f2; margin-top: 8px; max-height: 110px; overflow-y: auto; line-height: 1.6; }
+    #count-hint { font-size: 14px; color: #ffb4b4; margin-top: 8px; min-height: 18px; font-weight: 600; }
+    button.primary {
+      width: 100%; padding: 16px; border: none; border-radius: 14px; cursor: pointer;
+      font-size: 19px; font-weight: 800; color: #111111;
+      background: #ffb347; transition: transform .15s, opacity .2s;
+    }
+    button.primary:hover:not(:disabled) { transform: translateY(-2px); background: #ffc56b; }
+    button.primary:disabled { opacity: .4; cursor: not-allowed; }
+    #footnote { font-size: 13px; color: #c3cbe0; line-height: 1.6; }
+
+    /* 結果彈窗 */
+    #result-modal {
+      position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center;
+      background: rgba(5,8,20,.7);
+    }
+    #result-card {
+      width: min(400px, 92vw); padding: 30px 26px; border-radius: 20px; text-align: center;
+      background: #141b33; border: 2px solid #ffb347; box-shadow: 0 20px 50px rgba(0,0,0,.6);
+      animation: pop .4s cubic-bezier(.2,1.4,.4,1);
+    }
+    @keyframes pop { from { transform: scale(.7); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    #res-label { font-size: 15px; color: #ffb347; letter-spacing: 2px; font-weight: 700; }
+    #res-name { font-size: 28px; font-weight: 800; margin: 12px 0 8px; line-height: 1.35; color: #ffffff; }
+    #res-dist { font-size: 17px; color: #ffffff; font-weight: 600; }
+    #res-note { font-size: 15px; color: #d9e0f2; margin-top: 8px; min-height: 20px; }
+    #res-tags { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 16px 0 22px; }
+    .tag { font-size: 14px; padding: 5px 12px; border-radius: 999px; background: #2a3458; color: #ffffff; border: 1px solid #5a6a9a; font-weight: 600; }
+    .tag.cool { background: #0f3b5c; border-color: #4fb3ff; }
+    .tag.warm { background: #5c1f1f; border-color: #ff7b7b; }
+    .btn-row { display: flex; flex-direction: column; gap: 12px; }
+    .btn {
+      display: block; width: 100%; padding: 14px; border-radius: 12px; cursor: pointer;
+      font-size: 16px; font-weight: 700; text-decoration: none; text-align: center; color: #ffffff;
+      border: 1px solid #5a6a9a; background: #222c4d; font-family: inherit;
+    }
+    .btn:hover { background: #2e3a63; }
+    .btn.map { background: #ffb347; border: none; color: #111111; }
+    .btn.map:hover { background: #ffc56b; }
+
+    @media (max-width: 760px) {
+      #ui-container { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto; max-height: 48vh; padding: 16px; }
+      #header { font-size: 18px; padding: 12px 14px; }
+      #header small { display: none; }
+    }
+  </style>
+  <!-- 引進 Three.js CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+  <!-- 3D 畫布容器 -->
+  <div id="canvas-container"></div>
+
+  <div id="header">AI3 南港午餐 3D 決策器 <small>南港軟體園區 · 半徑 2 公里</small></div>
+  <div id="load-error" class="hidden">無法載入 3D 引擎（Three.js），請檢查網路連線；篩選功能仍可使用。</div>
+
+  <!-- 前端篩選 UI 層 -->
+  <div id="ui-container">
+    <div>
+      <div class="section-title">距離範圍</div>
+      <label class="opt"><input type="radio" name="dist" value="500"><span>500 公尺以內</span></label>
+      <label class="opt"><input type="radio" name="dist" value="1000"><span>1 公里以內</span></label>
+      <label class="opt"><input type="radio" name="dist" value="2000" checked><span>2 公里以內（預設）</span></label>
+    </div>
+
+    <div>
+      <div class="section-title">環境條件</div>
+      <label class="opt"><input type="checkbox" id="need-ac" checked><span>必須有冷氣（預設）</span></label>
+    </div>
+
+    <div>
+      <div class="section-title">食物種類</div>
+      <div class="grid2" id="type-group">
+        <label class="opt"><input type="checkbox" class="food-type" value="麵" checked><span>麵</span></label>
+        <label class="opt"><input type="checkbox" class="food-type" value="飯" checked><span>飯</span></label>
+        <label class="opt"><input type="checkbox" class="food-type" value="鍋貼/水餃" checked><span>鍋貼/水餃</span></label>
+        <label class="opt"><input type="checkbox" class="food-type" value="漢堡/美式" checked><span>漢堡/美式</span></label>
+        <label class="opt"><input type="checkbox" class="food-type" value="其他/小吃" checked><span>其他/小吃</span></label>
+      </div>
+    </div>
+
+    <div id="count-box">
+      符合條件的餐廳：<span id="count-num">0</span> 間
+      <div id="count-names"></div>
+      <div id="count-hint"></div>
+    </div>
+
+    <button class="primary" id="spin-btn">🎲 決定吃什麼！</button>
+
+    <div id="footnote">
+      中信金融園區與南港 LaLaport 內的店家先標示為有冷氣；其他店家冷氣暫定為無，確認後可修改資料。距離為粗估值。點結果可在 Google 地圖查看。
+    </div>
+  </div>
+
+  <!-- 結果彈窗層 -->
+  <div id="result-modal" class="hidden">
+    <div id="result-card">
+      <div id="res-label">今天就吃這個</div>
+      <div id="res-name">—</div>
+      <div id="res-dist">—</div>
+      <div id="res-note"></div>
+      <div id="res-tags"></div>
+      <div class="btn-row">
+        <a class="btn map" id="res-map" href="#" target="_blank" rel="noopener">🗺️ 開啟 Google 地圖導航</a>
+        <button class="btn" id="res-reroll">🔁 不滿意，再抽一次</button>
+        <button class="btn" id="res-refilter">⚙️ 重新篩選</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 1. 餐廳資料庫 (AI3 南港軟體園區 2 公里內，共 20 間)
+    // 距離為粗估值。hasAC：中信金融園區與 LaLaport 為 true（依使用者確認），其餘暫定 false。
+    const mapUrl = name => "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(name + " 台北市南港區");
+
+    const RESTAURANTS = [
+      // —— 中信金融園區（經貿二路 166/186/188 號一帶）——
+      { id: "rest_001", name: "麻布茶房 南港中信店", short: "麻布茶房", distanceMeters: 400, hasAC: true,
+        address: "經貿二路186-1號", categories: ["飯"], note: "鰻魚飯、日式丼飯 · 11:00–21:30", googleMapUrl: mapUrl("麻布茶房 南港中信店") },
+      { id: "rest_002", name: "Coppii Lumii 冉冉生活 南港店", short: "Coppii Lumii", distanceMeters: 500, hasAC: true,
+        address: "老爺行旅旁", categories: ["麵", "其他/小吃"], note: "早午餐、義大利麵、排餐；可帶寵物", googleMapUrl: mapUrl("Coppii Lumii 冉冉生活 南港") },
+      { id: "rest_003", name: "gonnaEAT 共樂遊 南港店", short: "gonnaEAT", distanceMeters: 500, hasAC: true,
+        address: "經貿二路186-1號C棟1樓", categories: ["麵", "漢堡/美式"], note: "歐式早午餐、漢堡、義大利麵", googleMapUrl: mapUrl("gonnaEAT 共樂遊 南港店") },
+      { id: "rest_004", name: "the Diner 樂子 南港店", short: "the Diner 樂子", distanceMeters: 600, hasAC: true,
+        address: "經貿二路166號A棟2樓", categories: ["漢堡/美式"], note: "美式早午餐 · 11:00–21:00", googleMapUrl: mapUrl("the Diner 樂子 南港店") },
+      { id: "rest_005", name: "南港老爺行旅 The Place Taipei", short: "老爺行旅", distanceMeters: 500, hasAC: true,
+        address: "經貿二路186號3樓C棟", categories: ["飯"], note: "日本料理、午間套餐", googleMapUrl: mapUrl("南港老爺行旅 The Place Taipei") },
+      { id: "rest_006", name: "大河屋 燒肉丼 串燒 中信南港店", short: "大河屋", distanceMeters: 500, hasAC: true,
+        address: "經貿二路186號3樓C棟", categories: ["飯"], note: "燒肉丼、串燒", googleMapUrl: mapUrl("大河屋 燒肉丼 串燒 中信南港店") },
+      { id: "rest_007", name: "欣葉小聚 今品南港店", short: "欣葉小聚", distanceMeters: 500, hasAC: true,
+        address: "南港中國信託園區A棟1樓", categories: ["飯"], note: "台菜單點、必比登推薦", googleMapUrl: mapUrl("欣葉小聚 今品南港店") },
+      { id: "rest_008", name: "漉海鮮蒸氣鍋", short: "漉海鮮", distanceMeters: 500, hasAC: true,
+        address: "經貿二路188號B棟3樓", categories: ["其他/小吃"], note: "現蒸海鮮鍋", googleMapUrl: mapUrl("漉海鮮蒸氣鍋 南港") },
+      { id: "rest_009", name: "好吃的飯捲鋪 南港店", short: "飯捲鋪", distanceMeters: 500, hasAC: true,
+        address: "經貿二路186號3F（104B棟）", categories: ["其他/小吃"], note: "韓式飯捲", googleMapUrl: mapUrl("好吃的飯捲鋪 南港") },
+      { id: "rest_010", name: "中一排骨", short: "中一排骨", distanceMeters: 600, hasAC: true,
+        address: "經貿二路188號", categories: ["飯"], note: "排骨飯", googleMapUrl: mapUrl("中一排骨 南港經貿二路") },
+
+      // —— 南港 LaLaport（經貿二路131號）——
+      { id: "rest_011", name: "林聰明沙鍋魚頭 LaLaport南港店", short: "林聰明沙鍋", distanceMeters: 700, hasAC: true,
+        address: "LaLaport B1F 美食街", categories: ["其他/小吃"], note: "沙鍋魚頭套餐、魯肉飯", googleMapUrl: mapUrl("林聰明沙鍋魚頭 LaLaport南港") },
+      { id: "rest_012", name: "三之星ミツボシ LaLaport南港店", short: "三之星", distanceMeters: 700, hasAC: true,
+        address: "經貿二路131號 LaLaport", categories: ["飯"], note: "袴鍋炊飯燒肉丼", googleMapUrl: mapUrl("三之星ミツボシ LaLaport南港") },
+      { id: "rest_013", name: "韓美膳 Hanbijae LaLaport南港店", short: "韓美膳", distanceMeters: 700, hasAC: true,
+        address: "經貿二路131號 LaLaport", categories: ["飯", "其他/小吃"], note: "石鍋拌飯、韓式小吃", googleMapUrl: mapUrl("韓美膳 Hanbijae LaLaport南港") },
+      { id: "rest_014", name: "茶嶋咖哩 LaLaport南港店", short: "茶嶋咖哩", distanceMeters: 700, hasAC: true,
+        address: "經貿二路131號 LaLaport", categories: ["飯"], note: "多國風味咖哩、沙茶咖哩", googleMapUrl: mapUrl("茶嶋咖哩 LaLaport南港") },
+      { id: "rest_015", name: "La Ohana LaLaport南港店", short: "La Ohana", distanceMeters: 700, hasAC: true,
+        address: "經貿二路131號 LaLaport", categories: ["漢堡/美式"], note: "夏威夷風格、Huli Huli烤雞、美式鬆餅", googleMapUrl: mapUrl("La Ohana LaLaport南港") },
+      { id: "rest_016", name: "SAPPORO BONE LaLaport南港店", short: "SAPPORO BONE", distanceMeters: 700, hasAC: true,
+        address: "經貿二路131號 LaLaport", categories: ["其他/小吃"], note: "炭烤生牛肉、各式炭烤排餐", googleMapUrl: mapUrl("SAPPORO BONE LaLaport南港") },
+      { id: "rest_017", name: "輪輪の町 南港LaLaport店", short: "輪輪の町", distanceMeters: 700, hasAC: true,
+        address: "LaLaport 2F", categories: ["漢堡/美式", "其他/小吃"], note: "火車主題早午餐", googleMapUrl: mapUrl("輪輪の町 南港LaLaport") },
+
+      // —— 其他位置（冷氣暫定為無）——
+      { id: "rest_018", name: "陶膳日本料理", short: "陶膳", distanceMeters: 1400, hasAC: false,
+        address: "園區街20號", categories: ["飯"], note: "定食、商業午餐、會議便當 · 週一公休", googleMapUrl: mapUrl("陶膳日本料理 南港") },
+      { id: "rest_019", name: "春月日式食堂", short: "春月食堂", distanceMeters: 1400, hasAC: false,
+        address: "南港路一段143號", categories: ["飯"], note: "平價定食、海鮮丼 · 11:30–14:00", googleMapUrl: mapUrl("春月日式食堂 南港") },
+      { id: "rest_020", name: "苒冉小食光", short: "苒冉小食光", distanceMeters: 1600, hasAC: false,
+        address: "興中路28巷5號", categories: ["飯", "其他/小吃"], note: "泰式打拋豬、辣牛肉湯飯 · 寵物友善", googleMapUrl: mapUrl("苒冉小食光 南港") }
+    ];
+
+    const FOOD_TYPES = ["麵", "飯", "鍋貼/水餃", "漢堡/美式", "其他/小吃"];
+    // 高對比色盤：淺色底配深色字
+    const PALETTE = ["#ffd166", "#ffb347", "#8ee4af", "#7fd3ff", "#c7b8ff", "#ff9aa2", "#f4f6fb", "#ffe066"];
+    const WALK_SPEED_M_PER_MIN = 80;
+    const WHEEL_R = 3.2;
+    const SPIN_DURATION_MS = 3000;
+    const SPIN_EXTRA_TURNS = 4;
+    const TAU = Math.PI * 2;
+
+    // 篩選狀態
+    const state = { maxDist: 2000, needAC: true, types: new Set(FOOD_TYPES) };
+    let currentEligible = [];
+
+    const $ = id => document.getElementById(id);
+
+    function matchesBase(r) {
+      return r.distanceMeters <= state.maxDist &&
+        r.categories.some(c => state.types.has(c));
+    }
+
+    function getEligible() {
+      return RESTAURANTS.filter(r => matchesBase(r) && (!state.needAC || r.hasAC));
+    }
+
+    // 2. Three.js 場景、相機、渲染器、燈光初始化
+    let renderer = null, scene = null, camera = null;
+    let outerGroup = null, spinGroup = null, wheelMesh = null, confPoints = null;
+    let spinning = false, spinFrom = 0, spinTo = 0, spinT0 = 0, pendingResult = null;
+    let confAge = 0, confActive = false;
+    const CONF_N = 220;
+    let confVel = null, confPos = null;
+    let lastTime = performance.now();
+
+    function initThree() {
+      if (typeof THREE === "undefined") { $("load-error").classList.remove("hidden"); return; }
+
+      const container = $("canvas-container");
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      container.appendChild(renderer.domElement);
+
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+      camera.position.set(0, 0, 11);
+
+      scene.add(new THREE.AmbientLight(0xffffff, 0.65));
+      const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+      dir.position.set(3, 5, 6);
+      scene.add(dir);
+
+      // 外層：傾斜 + 位移
+      outerGroup = new THREE.Group();
+      outerGroup.rotation.x = -0.35;
+      scene.add(outerGroup);
+
+      // 內層：繞 Z 軸旋轉的輪盤
+      spinGroup = new THREE.Group();
+      outerGroup.add(spinGroup);
+
+      // 輪盤外框
+      const rimGeo = new THREE.CylinderGeometry(WHEEL_R + 0.08, WHEEL_R + 0.08, 0.18, 128);
+      rimGeo.rotateX(Math.PI / 2);
+      const rim = new THREE.Mesh(rimGeo, new THREE.MeshStandardMaterial({ color: 0xffb347, metalness: 0.6, roughness: 0.3 }));
+      spinGroup.add(rim);
+
+      // 中心圓點
+      const hub = new THREE.Mesh(new THREE.SphereGeometry(0.22, 32, 32),
+        new THREE.MeshStandardMaterial({ color: 0x141b33, metalness: 0.5, roughness: 0.2 }));
+      hub.position.z = 0.2;
+      spinGroup.add(hub);
+
+      // 指針（固定在上方）
+      const pointer = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.45, 32),
+        new THREE.MeshStandardMaterial({ color: 0xff3b5c, metalness: 0.3, roughness: 0.4 }));
+      pointer.rotation.z = Math.PI;
+      pointer.position.set(0, WHEEL_R + 0.25, 0.25);
+      outerGroup.add(pointer);
+
+      // 粒子效果
+      confPos = new Float32Array(CONF_N * 3);
+      confVel = new Float32Array(CONF_N * 3);
+      const confCol = new Float32Array(CONF_N * 3);
+      const confGeo = new THREE.BufferGeometry();
+      confGeo.setAttribute("position", new THREE.BufferAttribute(confPos, 3));
+      confGeo.setAttribute("color", new THREE.BufferAttribute(confCol, 3));
+      const confMat = new THREE.PointsMaterial({ size: 0.13, vertexColors: true, transparent: true, opacity: 1, depthWrite: false });
+      confPoints = new THREE.Points(confGeo, confMat);
+      confPoints.visible = false;
+      scene.add(confPoints);
+
+      positionWheelForLayout();
+      rebuildWheel();
+      window.addEventListener("resize", onResize);
+      requestAnimationFrame(animate);
+    }
+
+    function positionWheelForLayout() {
+      if (!outerGroup) return;
+      const wide = window.innerWidth > 760;
+      outerGroup.position.x = wide ? 1.9 : 0;
+      outerGroup.position.y = wide ? -0.2 : 1.4;
+    }
+
+    function onResize() {
+      if (!renderer) return;
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      positionWheelForLayout();
+    }
+
+    // 3. 動態 3D 輪盤生成邏輯（Canvas 動態繪製文字貼圖）
+    function buildWheelTexture(items) {
+      const S = 1024, cx = S / 2, cy = S / 2, R = S / 2 - 4;
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = S;
+      const ctx = canvas.getContext("2d");
+
+      if (items.length === 0) {
+        ctx.fillStyle = "#2a3458";
+        ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.fill();
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 56px 'Noto Sans TC', sans-serif";
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText("無符合條件", cx, cy);
+      } else {
+        const n = items.length, step = TAU / n;
+        const fontSize = n <= 6 ? 46 : n <= 10 ? 38 : 32;
+        for (let i = 0; i < n; i++) {
+          const a0 = i * step, a1 = (i + 1) * step, mid = a0 + step / 2;
+
+          // 扇形底色
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.arc(cx, cy, R, -a0, -a1, true);   // 畫布 y 軸向下，角度取反
+          ctx.closePath();
+          ctx.fillStyle = PALETTE[i % PALETTE.length];
+          ctx.fill();
+          ctx.lineWidth = 8; ctx.strokeStyle = "#0b1020"; ctx.stroke();
+
+          // 扇形文字（沿半徑方向，由外向內）
+          const px = cx + Math.cos(mid) * R * 0.9;
+          const py = cy - Math.sin(mid) * R * 0.9;
+          ctx.save();
+          ctx.translate(px, py);
+          const right = Math.cos(mid) >= 0;
+          ctx.rotate(right ? -mid : -mid + Math.PI);
+          ctx.textAlign = right ? "right" : "left";
+          ctx.textBaseline = "middle";
+          ctx.font = `800 ${fontSize}px 'Noto Sans TC', 'Microsoft JhengHei', sans-serif`;
+          const label = items[i].short || items[i].name;
+          ctx.fillStyle = "#0b1020";
+          ctx.fillText(label, 0, 0, R * 0.6);
+          ctx.restore();
+        }
+      }
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.anisotropy = 4;
+      return tex;
+    }
+
+    function rebuildWheel() {
+      if (!spinGroup) return;
+      const tex = buildWheelTexture(currentEligible);
+      if (!wheelMesh) {
+        const geo = new THREE.CircleGeometry(WHEEL_R, 128);
+        const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.5, metalness: 0.05 });
+        wheelMesh = new THREE.Mesh(geo, mat);
+        wheelMesh.position.z = 0.1;
+        spinGroup.add(wheelMesh);
+      } else {
+        if (wheelMesh.material.map) wheelMesh.material.map.dispose();
+        wheelMesh.material.map = tex;
+        wheelMesh.material.needsUpdate = true;
+      }
+    }
+
+    // 4. 篩選條件過濾邏輯 + 即時 UI 更新
+    function updateEligible() {
+      currentEligible = getEligible();
+      const n = currentEligible.length;
+      $("count-num").textContent = n;
+      $("count-names").textContent = n ? currentEligible.map(r => r.short || r.name).join("、") : "";
+
+      const noTypes = state.types.size === 0;
+      let hint = "";
+      if (noTypes) {
+        hint = "請至少勾選一種食物類型";
+      } else if (n === 0) {
+        const relaxed = state.needAC ? RESTAURANTS.filter(matchesBase).length : 0;
+        hint = relaxed > 0
+          ? `冷氣條件下為 0 間，取消「必須有冷氣」可看到 ${relaxed} 間`
+          : "沒有符合條件的餐廳，請放寬篩選";
+      }
+      $("count-hint").textContent = hint;
+      $("spin-btn").disabled = spinning || n === 0;
+
+      if (!spinning) rebuildWheel();
+    }
+
+    // 5. 轉動動畫與 Ease-Out 演算法
+    function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
+    function setControlsDisabled(disabled) {
+      document.querySelectorAll("#ui-container input").forEach(el => el.disabled = disabled);
+      $("spin-btn").disabled = disabled || currentEligible.length === 0;
+    }
+
+    function startSpin() {
+      if (spinning || currentEligible.length === 0 || !spinGroup) return;
+      const n = currentEligible.length;
+      const idx = Math.floor(Math.random() * n);
+      const step = TAU / n;
+      const mid = idx * step + step / 2;
+      const from = spinGroup.rotation.z;
+      const delta = ((Math.PI / 2 - mid - from) % TAU + TAU) % TAU;
+      spinFrom = from;
+      spinTo = from + SPIN_EXTRA_TURNS * TAU + delta;
+      spinT0 = performance.now();
+      pendingResult = currentEligible[idx];
+      spinning = true;
+      setControlsDisabled(true);
+      if (confPoints) confPoints.visible = false;
+    }
+
+    function onSpinEnd() {
+      spinning = false;
+      setControlsDisabled(false);
+      burstConfetti();
+      const r = pendingResult;
+      setTimeout(() => showResult(r), 500);
+      updateEligible();
+    }
+
+    // 粒子效果
+    function burstConfetti() {
+      if (!confPoints) return;
+      const colors = [0xff7a59, 0xffb347, 0xffd166, 0x06d6a0, 0x118ab2, 0x8e7dff, 0xef476f];
+      const col = confPoints.geometry.attributes.color.array;
+      const c = new THREE.Color();
+      for (let i = 0; i < CONF_N; i++) {
+        confPos[i * 3] = 0; confPos[i * 3 + 1] = 0; confPos[i * 3 + 2] = 0.8;
+        const ang = Math.random() * TAU, sp = 2 + Math.random() * 5;
+        confVel[i * 3] = Math.cos(ang) * sp;
+        confVel[i * 3 + 1] = Math.sin(ang) * sp + 2;
+        confVel[i * 3 + 2] = 1 + Math.random() * 3;
+        c.setHex(colors[i % colors.length]);
+        col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+      }
+      confPoints.geometry.attributes.color.needsUpdate = true;
+      confPoints.material.opacity = 1;
+      confPoints.visible = true;
+      confAge = 0;
+      confActive = true;
+    }
+
+    function updateConfetti(dt) {
+      if (!confActive) return;
+      confAge += dt;
+      const pos = confPoints.geometry.attributes.position;
+      for (let i = 0; i < CONF_N; i++) {
+        confVel[i * 3 + 1] -= 9.8 * dt * 0.6;
+        confPos[i * 3] += confVel[i * 3] * dt;
+        confPos[i * 3 + 1] += confVel[i * 3 + 1] * dt;
+        confPos[i * 3 + 2] += confVel[i * 3 + 2] * dt;
+      }
+      pos.needsUpdate = true;
+      confPoints.material.opacity = Math.max(0, 1 - confAge / 2.5);
+      if (confAge > 2.5) { confActive = false; confPoints.visible = false; }
+    }
+
+    function animate(now) {
+      requestAnimationFrame(animate);
+      const dt = Math.min(0.05, (now - lastTime) / 1000);
+      lastTime = now;
+
+      if (spinning) {
+        const t = Math.min(1, (now - spinT0) / SPIN_DURATION_MS);
+        spinGroup.rotation.z = spinFrom + (spinTo - spinFrom) * easeOutCubic(t);
+        if (t >= 1) onSpinEnd();
+      } else if (spinGroup) {
+        spinGroup.rotation.z += 0.003;
+      }
+
+      updateConfetti(dt);
+      if (renderer && scene && camera) renderer.render(scene, camera);
+    }
+
+    // 6. 結果展示
+    function showResult(r) {
+      if (!r) return;
+      $("res-name").textContent = r.name;
+      const mins = Math.max(1, Math.round(r.distanceMeters / WALK_SPEED_M_PER_MIN));
+      $("res-dist").textContent = `約 ${r.distanceMeters} 公尺，步行約 ${mins} 分鐘`;
+      const noteParts = [r.address, r.note].filter(Boolean);
+      $("res-note").textContent = noteParts.join(" · ");
+      $("res-map").href = r.googleMapUrl;
+
+      const tags = $("res-tags");
+      tags.innerHTML = "";
+      const acTag = document.createElement("span");
+      acTag.className = "tag " + (r.hasAC ? "cool" : "warm");
+      acTag.textContent = r.hasAC ? "❄️ 有冷氣" : "🔥 冷氣待確認";
+      tags.appendChild(acTag);
+      r.categories.forEach(c => {
+        const t = document.createElement("span");
+        t.className = "tag";
+        t.textContent = c;
+        tags.appendChild(t);
+      });
+      $("result-modal").classList.remove("hidden");
+    }
+
+    function hideResult() { $("result-modal").classList.add("hidden"); }
+
+    // UI 事件監聽
+    document.querySelectorAll('input[name="dist"]').forEach(el => {
+      el.addEventListener("change", () => { state.maxDist = Number(el.value); updateEligible(); });
+    });
+    $("need-ac").addEventListener("change", e => { state.needAC = e.target.checked; updateEligible(); });
+    document.querySelectorAll(".food-type").forEach(el => {
+      el.addEventListener("change", () => {
+        el.checked ? state.types.add(el.value) : state.types.delete(el.value);
+        updateEligible();
+      });
+    });
+    $("spin-btn").addEventListener("click", () => { hideResult(); startSpin(); });
+    $("res-reroll").addEventListener("click", () => { hideResult(); startSpin(); });
+    $("res-refilter").addEventListener("click", () => { hideResult(); });
+    $("result-modal").addEventListener("click", e => { if (e.target.id === "result-modal") hideResult(); });
+
+    // 初始化
+    initThree();
+    updateEligible();
+  </script>
+</body>
+</html>
