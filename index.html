@@ -65,7 +65,8 @@
     @keyframes walk-across { from { transform: translateX(-80px); } to { transform: translateX(calc(100vw + 80px)); } }
     @keyframes bob { 0%,100% { translate: 0 0; } 50% { translate: 0 -2px; } }
     @keyframes swing { from { transform: rotate(-24deg); } to { transform: rotate(24deg); } }
-    @media (prefers-reduced-motion: reduce) { .crowd { display: none; } }
+    /* 開啟「減少動態效果」時：仍顯示路人，但只緩慢平移，不擺腿、不起伏 */
+    @media (prefers-reduced-motion: reduce) { .walker svg, .walker .leg { animation: none; } }
     .booking-button {
       position: fixed;
       right: calc(20px + env(safe-area-inset-right, 0px));
@@ -905,7 +906,8 @@
   // 人來人往：隨機產生路人剪影，速度／大小／方向／顏色各不相同
   (function () {
     var box = document.getElementById('crowd');
-    if (!box || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (!box) return;
+    var slow = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 3 : 1;
     var colors = ['#FBF6EE', '#FBF6EE', '#F3EADB', '#E07A2E'];
     var svg = '<svg viewBox="0 0 24 60" width="W" height="H" fill="C">' +
       '<circle cx="12" cy="7" r="5"/><rect x="6.5" y="13" width="11" height="24" rx="5"/>' +
@@ -916,7 +918,7 @@
       var el = document.createElement('div');
       el.className = 'walker' + (i % 2 ? ' rtl' : '');
       el.innerHTML = svg.replace('W', w).replace('H', h).replace('C', colors[i % colors.length]);
-      var dur = 14 + Math.random() * 16;
+      var dur = (14 + Math.random() * 16) * slow;
       el.style.animationDuration = dur + 's';
       el.style.animationDelay = '-' + (Math.random() * dur).toFixed(1) + 's';
       el.style.animationDirection = i % 2 ? 'reverse' : 'normal';
