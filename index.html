@@ -697,8 +697,8 @@
           </div>
         </div>
 
-        <button type="submit" class="w-full rounded-full bg-ember py-3.5 font-semibold text-white shadow-lg shadow-ember/30 transition hover:bg-ember-dark">
-          送出訂單
+        <button type="submit" :disabled="submitting" class="w-full rounded-full bg-ember py-3.5 font-semibold text-white shadow-lg shadow-ember/30 transition hover:bg-ember-dark disabled:cursor-wait disabled:opacity-60">
+          <span x-text="submitting ? '送出中…' : '送出訂單'"></span>
         </button>
       </form>
     </div>
@@ -732,6 +732,10 @@
      spicy: 辣度 (0-3)
      hot: 是否列入「熱門餐點」
   ---------------------------------------------------------- */
+  /* 訂單送出位置：貼上 Google Apps Script「網頁應用程式」網址（設定方式見 docs/GOOGLE_SHEETS_SETUP.md）。
+     留空時不會送出到 Google Sheet，只在畫面上建立示範訂單。 */
+  const ORDER_ENDPOINT = 'https://script.google.com/macros/s/AKfycbw-npp83itWGzzNg6ZD3GcP4uOMo9QYNAcIZAb8f3hnpk6nusUeBRMVdjMJu0azkqlP/exec';
+
   const PRODUCTS = [
     { id: 'p1', cat: 'signature', name: '招牌豬肉鍋貼（12 入）', desc: '經典招牌，手工豬肉餡配高麗菜，底部金黃酥脆、內餡多汁。', price: 150, tag: '人氣', spicy: 0, hot: true,
       img: 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?auto=format&fit=crop&w=800&q=80' },
@@ -779,6 +783,8 @@
       checkoutOpen: false,
       success: false,
       orderNo: '',
+      submitting: false,        // 訂單送出中（防止連點）
+      requestId: '',            // 本次結帳的識別碼，後端用來避免重複建立訂單
       mobileOpen: false,
 
       activeCat: 'signature',
@@ -885,6 +891,7 @@
         this.cartOpen = false;
         this.success = false;
         this.errors = {};
+        if (!this.requestId) this.requestId = this.newRequestId();
         this.checkoutOpen = true;
       },
       closeCheckout() {
@@ -902,12 +909,59 @@
         this.errors = e;
         return Object.keys(e).length === 0;
       },
-      submitOrder() {
-        if (!this.validate()) return;
-        this.orderNo = 'JB' + Date.now().toString().slice(-8);
+      newRequestId() {
+        if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+        return 'r-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+      },
+      finishOrder(orderNo) {
+        this.orderNo = orderNo;
         this.success = true;
         this.cart = [];
+        this.requestId = '';
         this.refreshIcons();
+      },
+      async submitOrder() {
+        if (this.submitting || !this.validate()) return;
+
+        // 尚未設定 Google Sheet 網址：維持示範模式
+        if (!ORDER_ENDPOINT) {
+          this.finishOrder('JB' + Date.now().toString().slice(-8));
+          return;
+        }
+
+        // 只送商品代號與數量；價格由後端依價格表重新計算
+        const payload = {
+          requestId: this.requestId,
+          type: this.form.type,
+          name: this.form.name.trim(),
+          phone: this.form.phone.trim(),
+          address: this.form.type === 'delivery' ? this.form.address.trim() : '',
+          time: this.form.time,
+          note: this.form.note.trim(),
+          items: this.cart.map(i => ({ id: i.id, qty: i.qty }))
+        };
+
+        this.submitting = true;
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 20000);
+        try {
+          // text/plain 屬於「簡單請求」，不會觸發 CORS 預檢，Apps Script 才收得到
+          const res = await fetch(ORDER_ENDPOINT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(payload),
+            signal: ctrl.signal
+          });
+          const data = await res.json();
+          if (!data.ok) throw new Error(data.error || '訂單送出失敗');
+          this.finishOrder(data.orderNo);
+        } catch (err) {
+          const known = err && err.message && !/fetch|abort|network|json|unexpected/i.test(err.message);
+          this.showToast(known ? err.message : '訂單送出失敗，請檢查網路後再試一次');
+        } finally {
+          clearTimeout(timer);
+          this.submitting = false;
+        }
       },
 
       /* ---------- 電子報 ---------- */
