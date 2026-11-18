@@ -1,6 +1,6 @@
 // 金邊鍋貼 Service Worker：離線可開啟首頁
-const CACHE = 'jinbian-v2';
-const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'crowd3d.js', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
+const CACHE = 'jinbian-v3';
+const SHELL = ['./', 'index.html', 'order.html','manifest.webmanifest', 'crowd3d.js', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

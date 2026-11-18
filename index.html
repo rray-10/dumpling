@@ -137,6 +137,7 @@
       <li><a href="#gifts" class="hover:text-ember transition">冷凍禮盒</a></li>
       <li><a href="#stores" class="hover:text-ember transition">門市據點</a></li>
       <li><a href="#contact" class="hover:text-ember transition">聯絡我們</a></li>
+      <li><a href="order.html" class="hover:text-ember transition">訂單查詢</a></li>
     </ul>
 
     <!-- 右側：購物車 + CTA + 手機選單 -->
@@ -163,6 +164,7 @@
       <li><a @click="mobileOpen = false" href="#gifts" class="block py-3">冷凍禮盒</a></li>
       <li><a @click="mobileOpen = false" href="#stores" class="block py-3">門市據點</a></li>
       <li><a @click="mobileOpen = false" href="#contact" class="block py-3">聯絡我們</a></li>
+      <li><a href="order.html" class="block py-3">訂單查詢</a></li>
       <li class="pt-2 pb-3">
         <a @click="mobileOpen = false" href="#order" class="block rounded-full bg-ember py-3 text-center font-semibold text-white">立即點餐</a>
       </li>
@@ -532,6 +534,7 @@
       <a href="#gifts" class="hover:text-ember">冷凍禮盒</a>
       <a href="#stores" class="hover:text-ember">門市據點</a>
       <a href="#contact" class="hover:text-ember">聯絡我們</a>
+      <a href="order.html" class="hover:text-ember">訂單查詢</a>
     </nav>
 
     <div>
@@ -717,7 +720,8 @@
       <h2 class="mt-6 font-serif text-2xl font-bold">訂單已建立</h2>
       <p class="mt-2 text-sm text-wood/70">感謝您的訂購，我們已開始為您準備。</p>
       <p class="mt-6 rounded-xl bg-white px-6 py-3 text-sm ring-1 ring-wood/10">訂單編號：<span class="font-bold tracking-wider text-ember" x-text="orderNo"></span></p>
-      <button type="button" @click="closeCheckout()" class="mt-8 rounded-full bg-wood px-8 py-3 font-semibold text-cream transition hover:bg-ember">返回首頁</button>
+      <a :href="'order.html?no=' + encodeURIComponent(orderNo)" class="mt-8 inline-flex items-center gap-2 rounded-full bg-ember px-8 py-3 font-semibold text-white transition hover:bg-ember-dark"><i data-lucide="search" class="h-4 w-4"></i>查詢訂單進度</a>
+      <button type="button" @click="closeCheckout()" class="mt-3 rounded-full bg-wood px-8 py-3 font-semibold text-cream transition hover:bg-ember">返回首頁</button>
     </div>
   </div>
 </div>
@@ -921,6 +925,7 @@
       },
       finishOrder(orderNo) {
         this.orderNo = orderNo;
+        try { localStorage.setItem('jb_lookup', JSON.stringify({ no: orderNo, phone: this.form.phone.trim() })); } catch (e) {}
         this.success = true;
         this.cart = [];
         this.requestId = '';
