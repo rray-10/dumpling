@@ -19,10 +19,13 @@ var CONFIG = {
 };
 
 var SHEET = { ORDERS: 'Orders', ITEMS: 'OrderItems', PRODUCTS: 'Products' };
-var STATUSES = ['新訂單', '製作中', '可取餐／已出餐', '已完成', '已取消'];
+var STATUSES = ['已收到', '製作中', '可取餐', '已完成'];
+// 舊版狀態文字 → 新狀態（查詢時對應，不改舊資料）
+var LEGACY_STATUS = { '新訂單': '已收到', '可取餐／已出餐': '可取餐' };
 
 var ORDER_HEADERS = ['訂單編號', '建立時間', '狀態', '取餐方式', '姓名', '電話', '配送地址',
-  '希望時間', '備註', '小計', '運費', '應付總額', '品項摘要', 'RequestId'];
+  '希望時間', '備註', '小計', '運費', '應付總額', '品項摘要', 'RequestId', '更新時間'];
+var COL = { NO: 1, CREATED: 2, STATUS: 3, TYPE: 4, PHONE: 6, SUBTOTAL: 10, SHIPPING: 11, TOTAL: 12, UPDATED: 15 };
 var ITEM_HEADERS = ['訂單編號', '商品ID', '品名', '單價', '數量', '小計'];
 var PRODUCT_HEADERS = ['商品ID', '分類', '品名', '價格', '上架'];
 
@@ -57,6 +60,7 @@ function setup() {
     SpreadsheetApp.newDataValidation().requireValueInList(STATUSES, true).setAllowInvalid(false).build());
   orders.getRange(2, 2, 1000, 1).setNumberFormat('yyyy-mm-dd hh:mm:ss');
   orders.getRange(2, 6, 1000, 1).setNumberFormat('@');   // 電話保留開頭 0
+  orders.getRange(2, COL.UPDATED, 1000, 1).setNumberFormat('yyyy-mm-dd hh:mm:ss');
 
   var items = getOrCreate_(ss, SHEET.ITEMS);
   ensureHeader_(items, ITEM_HEADERS);
@@ -76,8 +80,81 @@ function setup() {
 }
 
 /* ===================== Web App 入口 ===================== */
-function doGet() {
+function doGet(e) {
+  var p = (e && e.parameter) || {};
+  if (p.action === 'order') {
+    try {
+      return json_(lookup_(p.no, p.phone));
+    } catch (err) {
+      if (err && err.userMessage) return json_({ ok: false, error: err.userMessage });
+      console.error(err && err.stack ? err.stack : err);
+      return json_({ ok: false, error: '系統發生錯誤，請稍後再試' });
+    }
+  }
   return json_({ ok: true, service: 'jinbian-orders' });
+}
+
+// 店家在 Orders 改「狀態」時，自動記錄更新時間（簡單觸發，不需另外設定）
+function onEdit(e) {
+  var r = e && e.range;
+  if (!r || r.getSheet().getName() !== SHEET.ORDERS || r.getRow() < 2) return;
+  if (r.getColumn() > COL.STATUS || r.getLastColumn() < COL.STATUS) return;
+  r.getSheet().getRange(r.getRow(), COL.UPDATED, r.getNumRows(), 1).setValue(new Date());
+}
+
+/* ===================== 訂單查詢 ===================== */
+var NOT_FOUND = '查無此訂單，請確認訂單編號與電話';
+
+function digits_(v) { return String(v == null ? '' : v).replace(/\D/g, ''); }
+
+function lookup_(no, phone) {
+  no = String(no || '').trim().toUpperCase();
+  var ph = digits_(phone);
+  if (!/^[A-Z]{1,4}\d{9}$/.test(no)) fail_('請輸入正確的訂單編號');
+  if (ph.length < 8) fail_('請輸入下單時的電話');
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var orders = ss.getSheetByName(SHEET.ORDERS);
+  var last = orders.getLastRow();
+  if (last < 2) fail_(NOT_FOUND);
+  var rows = orders.getRange(2, 1, last - 1, ORDER_HEADERS.length).getValues();
+  var row = null;
+  for (var i = rows.length - 1; i >= 0; i--) {
+    if (String(rows[i][COL.NO - 1]) === no) { row = rows[i]; break; }
+  }
+  // 訂單編號是流水號，必須電話相符才回傳，避免他人猜編號查看
+  if (!row || digits_(row[COL.PHONE - 1]) !== ph) fail_(NOT_FOUND);
+
+  var raw = String(row[COL.STATUS - 1] || '').trim();
+  var status = LEGACY_STATUS[raw] || raw || STATUSES[0];
+
+  var itemSheet = ss.getSheetByName(SHEET.ITEMS);
+  var items = [];
+  if (itemSheet.getLastRow() >= 2) {
+    itemSheet.getRange(2, 1, itemSheet.getLastRow() - 1, ITEM_HEADERS.length).getValues().forEach(function (r) {
+      if (String(r[0]) === no) items.push({ name: String(r[2]), price: Number(r[3]), qty: Number(r[4]) });
+    });
+  }
+
+  var created = row[COL.CREATED - 1];
+  var updated = row[COL.UPDATED - 1] || created;
+  return {
+    ok: true,
+    orderNo: no,
+    status: status,
+    statusStep: STATUSES.indexOf(status),
+    type: String(row[COL.TYPE - 1]),
+    createdAt: fmtTime_(created),
+    updatedAt: fmtTime_(updated),
+    items: items,
+    subtotal: Number(row[COL.SUBTOTAL - 1]),
+    shipping: Number(row[COL.SHIPPING - 1]),
+    total: Number(row[COL.TOTAL - 1])
+  };
+}
+
+function fmtTime_(v) {
+  return v instanceof Date ? Utilities.formatDate(v, CONFIG.TIMEZONE, 'yyyy-MM-dd HH:mm') : String(v || '');
 }
 
 function doPost(e) {
@@ -104,7 +181,7 @@ function doPost(e) {
     ss.getSheetByName(SHEET.ORDERS).appendRow([
       orderNo, now, STATUSES[0], TYPE_LABEL[data.type], safe_(data.name), safe_(data.phone),
       safe_(data.address), safe_(data.time), safe_(data.note),
-      priced.subtotal, priced.shipping, priced.total, summary, data.requestId
+      priced.subtotal, priced.shipping, priced.total, summary, data.requestId, now
     ]);
 
     var itemSheet = ss.getSheetByName(SHEET.ITEMS);
